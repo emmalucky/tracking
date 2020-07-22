@@ -1,135 +1,139 @@
-import os
-import time
-
+import pandas as pd
+from tracker import SSTTracker, TrackerConfig, Track
+# from sst_tracker import TrackSet as SSTTracker
 import cv2
-import torch
-import torch.utils.data as data
-import torch.optim as optim
-from visdom import Visdom
+from data.mot_data_reader import MOTDataReader
 import numpy as np
-
-from layer.model import EfficientNet
-from efficientnet import EfficientNet as EffNet
-from data.mot import MOTTrainDataset
-from layer.model_loss import SSTLoss
-from utils.augmentations import SSJAugmentation, collate_fn
 from config.config import config
-from torch.autograd import Variable
+from utils.timer import Timer
+import argparse
+import os
+import torch
+
+parser = argparse.ArgumentParser(description='Single Shot Tracker Test')
+parser.add_argument('--version', default='v1', help='current version')
+parser.add_argument('--mot_root', default=config['mot_root'], help='MOT ROOT')
+parser.add_argument('--type', default=config['type'], help='train/test')
+parser.add_argument('--show_image', default=True, help='show image if true, or hidden')
+parser.add_argument('--save_video', default=True, help='save video if true')
+parser.add_argument('--log_folder', default=config['log_folder'], help='video saving or result saving folder')
+parser.add_argument('--mot_version', default=17, help='mot version')
+
+args = parser.parse_args()
 
 
-def adjust_learning_rate(optimizer, gamma, step):
-    """Sets the learning rate to the initial LR decayed by 10 at every specified step
-    # Adapted from PyTorch Imagenet example:
-    # https://github.com/pytorch/examples/blob/master/imagenet/main.py
-    """
-    lr = config['learning_rate'] * (gamma ** (step))
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = lr
-    return lr
+def test(choice=None):
+    if args.type == 'train':
+        dataset_index = [2, 4, 5, 9, 10, 11, 13]
+        dataset_detection_type = {'-DPM', '-FRCNN', '-SDP'}
 
+    if args.type == 'test':
+        # dataset_index = [1, 3, 6, 7, 8, 12, 14]
+        dataset_index = [1]
+        dataset_detection_type = {'-SDP'}
+        # dataset_detection_type = {'-FRCNN', '-SDP', '-DPM'}
 
-def train():
-    if config['cuda']:
-        model = EfficientNet(0).cuda()
-    else:
-        model = EfficientNet(0)
-    optimizer = optim.SGD(model.parameters(), lr=config['learning_rate'],
-                          momentum=config['momentum'],
-                          weight_decay=config['weight_decay'])
-    criterion = SSTLoss(config['cuda'])
-    if 'learning_rate_decay_by_epoch' in config:
-        stepvalues = list((config['epoch_size'] * i for i in config['learning_rate_decay_by_epoch']))
-        save_weights_iteration = config['save_weight_every_epoch_num'] * config['epoch_size']
-    else:
-        stepvalues = (90000, 95000)
-        save_weights_iteration = 5000
+    dataset_image_folder_format = os.path.join(args.mot_root,
+                                               args.type + '/MOT' + str(args.mot_version) + '-{:02}{}/img1')
+    detection_file_name_format = os.path.join(args.mot_root,
+                                              args.type + '/MOT' + str(args.mot_version) + '-{:02}{}/det/det.txt')
 
-    # data 处理
-    dataset = MOTTrainDataset(config['mot_root'], SSJAugmentation(config['sst_dim'], config['mean_pixel']))
-    epoch_size = len(dataset)
-    step_index = 0
-    data_loader = data.DataLoader(dataset, config['batch_size'], collate_fn=collate_fn)
-    batch_iterator = None
-    current_lr = config['learning_rate']
-    model.train()
-    viz = Visdom()
-    global_step = 0
-    if config['tensorboard']:
-        from tensorboardX import SummaryWriter
+    if not os.path.exists(args.log_folder):
+        os.mkdir(args.log_folder)
 
-        if not os.path.exists(config['log_folder']):
-            os.mkdir(config['log_folder'])
-        writer = SummaryWriter(log_dir=config['log_folder'])
-    for iteration in range(config['start_iter'], config['iterations']):
-        if (not batch_iterator) or (iteration % epoch_size == 0):
-            # create batch iterator
-            batch_iterator = iter(data_loader)
-            all_epoch_loss = []
+    save_folder = ''
+    choice_str = ''
+    if not choice is None:
+        choice_str = TrackerConfig.get_configure_str(choice)
+        save_folder = os.path.join(args.log_folder, choice_str)
+        if not os.path.exists(save_folder):
+            os.mkdir(save_folder)
+        # else:
+        #     return
 
-        if iteration in stepvalues:
-            step_index += 1
-            current_lr = adjust_learning_rate(optimizer, config['gamma'], step_index)
-        img_pre, img_next, boxes_pre, boxes_next, labels, valid_pre, valid_next = next(batch_iterator)
-        if config['cuda']:
-            img_pre = Variable(img_pre.cuda())
-            img_next = Variable(img_next.cuda())
-            boxes_pre = Variable(boxes_pre.cuda())
-            boxes_next = Variable(boxes_next.cuda())
-            with torch.no_grad():
-                valid_pre = Variable(valid_pre.cuda())
-                valid_next = Variable(valid_next.cuda())
-                labels = Variable(labels.cuda())
+    saved_file_name_format = os.path.join(save_folder, 'MOT' + str(args.mot_version) + '-{:02}{}.txt')
+    save_video_name_format = os.path.join(save_folder, 'MOT' + str(args.mot_version) + '-{:02}{}.avi')
 
-        else:
-            img_pre = Variable(img_pre)
-            img_next = Variable(img_next)
-            boxes_pre = Variable(boxes_pre)
-            boxes_next = Variable(boxes_next)
-            with torch.no_grad():
-                valid_pre = Variable(valid_pre)
-                valid_next = Variable(valid_next)
-                labels = Variable(labels)
-        t0 = time.time()
-        current_feature, next_feature = model(img_pre, img_next, boxes_pre, boxes_next)
-        optimizer.zero_grad()
-        loss_pre, loss_next, loss_similarity, loss, accuracy_pre, accuracy_next, accuracy, predict_indexes = \
-            criterion(current_feature, next_feature, labels, valid_pre, valid_next)
-        loss.backward()
-        optimizer.step()
-        t1 = time.time()
-        all_epoch_loss += [loss.data.cpu()]
-        if iteration % 10 == 0:
-            global_step = global_step + 1
-            viz.line([loss.item()], [global_step], win='train_loss', update='append')
-            print('Timer: %.4f sec.' % (t1 - t0))
-            print('iter ' + repr(iteration) + ', ' + repr(epoch_size) + ' || epoch: %.4f ' % (
-                    iteration / (float)(epoch_size)) + ' || Loss: %.4f ||' % (loss.item()), end=' ')
-        if config['tensorboard']:
-            if len(all_epoch_loss) > 30:
-                writer.add_scalar('data/epoch_loss', float(np.mean(all_epoch_loss)), iteration)
-            writer.add_scalar('data/learning_rate', current_lr, iteration)
+    f = lambda format_str: [format_str.format(index, type) for type in dataset_detection_type for index in
+                            dataset_index]
 
-            writer.add_scalar('loss/loss', loss.data.cpu(), iteration)
-            writer.add_scalar('loss/loss_pre', loss_pre.data.cpu(), iteration)
-            writer.add_scalar('loss/loss_next', loss_next.data.cpu(), iteration)
-            writer.add_scalar('loss/loss_similarity', loss_similarity.data.cpu(), iteration)
+    timer = Timer()
+    for image_folder, detection_file_name, saved_file_name, save_video_name in zip(f(dataset_image_folder_format),
+                                                                                   f(detection_file_name_format),
+                                                                                   f(saved_file_name_format),
+                                                                                   f(save_video_name_format)):
+        print('start processing ' + saved_file_name)
+        tracker = SSTTracker()
+        reader = MOTDataReader(image_folder=image_folder,
+                               detection_file_name=detection_file_name,
+                               min_confidence=0.0)
+        result = list()
+        result_str = saved_file_name
+        first_run = True
+        for i, item in enumerate(reader):
+            if i > len(reader):
+                break
 
-            writer.add_scalar('accuracy/accuracy', accuracy.data.cpu(), iteration)
-            writer.add_scalar('accuracy/accuracy_pre', accuracy_pre.data.cpu(), iteration)
-            writer.add_scalar('accuracy/accuracy_next', accuracy_next.data.cpu(), iteration)
+            if item is None:
+                continue
 
-            # add weights
-            if iteration % 1000 == 0:
-                for name, param in model.named_parameters():
-                    writer.add_histogram(name, param.clone().cpu().data.numpy(), iteration)
-        if iteration % save_weights_iteration == 0:
-            print('Saving state, iter:', iteration)
-            torch.save(model.state_dict(),
-                       os.path.join(
-                           config['save_folder'],
-                           'sst300_0712_' + repr(iteration) + '.pth'))
-    torch.save(model.state_dict(), config['save_folder'] + '' + config['version'] + '.pth')
+            img = item[0]
+            det = item[1]
+            h, w, _ = img.shape
+
+            if img is None or det is None or len(det) == 0:
+                continue
+
+            if len(det) > config['max_object']:
+                det = det[:config['max_object'], :]
+
+            if first_run and args.save_video:
+                vw = cv2.VideoWriter(save_video_name, cv2.VideoWriter_fourcc('M', 'J', 'P', 'G'), 10, (w, h))
+                first_run = False
+
+            timer.tic()
+            image_org = tracker.update(img, det[:, 2:6], args.show_image, i)
+            timer.toc()
+            print(
+                '{}:{}, {}, {}\r'.format(os.path.basename(saved_file_name), i, int(i * 100 / len(reader)), choice_str))
+
+            if args.show_image and not image_org is None:
+                cv2.imshow('res', image_org)
+                cv2.waitKey(1)
+
+            if args.save_video and not image_org is None:
+                vw.write(image_org)
+
+            # save result
+            for t in tracker.tracks:
+                n = t.nodes[-1]
+                if t.age == 1:
+                    b = n.get_box(tracker.frame_index - 1, tracker.recorder)
+                    result.append(
+                        [i+1] + [t.id] + [b[0], b[1], b[2], b[3]] + [-1, -1, -1, -1]
+                    )
+
+        # save data
+        # np.savetxt(saved_file_name, np.array(result).astype(int), fmt='%i')
+        text = pd.DataFrame(result)
+        text.to_csv(saved_file_name, header=None, index=None, mode='a+')
+        print(result_str)
+
+    print(timer.total_time)
+    print(timer.average_time)
 
 
 if __name__ == '__main__':
-    train()
+    all_choices = TrackerConfig.get_choices_age_node()
+    iteration = 3
+    # test()
+
+    i = 0
+    for age in range(1):
+        for node in range(1):
+            c = (0, 0, 4, 0, 3, 3)
+            choice_str = TrackerConfig.get_configure_str(c)
+            TrackerConfig.set_configure(c)
+            print('=============================={}.{}=============================='.format(i, choice_str))
+            test(c)
+            i += 1

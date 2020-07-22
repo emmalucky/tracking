@@ -15,6 +15,9 @@ class SSTLoss(nn.Module):
         self.false_constant = config['false_constant']
 
     def add_unmatched_dim(self, x):
+        if self.false_objects_column is not None and self.false_objects_column.shape[0]!=x.shape[0]:
+            self.false_objects_column = None
+            self.false_objects_row = None
         if self.false_objects_column is None:
             self.false_objects_column = Variable(
                 torch.ones(x.shape[0], x.shape[1], x.shape[2], 1)) * self.false_constant

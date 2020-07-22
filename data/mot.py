@@ -86,7 +86,7 @@ class GTSingleParser:
             det = gt_group.get_group(key).values
             ids = np.array(det[:, 1]).astype(int)
             det = np.array(det[:, 2:6])
-            det[:, 2:4] += det[:, :2]
+            # det[:, 2:4] += det[:, :2]
 
             self.recorder[key - 1] = list()
             # 3.1 update tracks

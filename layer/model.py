@@ -1,3 +1,4 @@
+import cv2
 import torch.nn as nn
 import torch
 import numpy as np
@@ -21,9 +22,15 @@ class EfficientNet(nn.Module):
     def __init__(self, compound_coef, load_weights=False, use_gpu=config['cuda'], crop_size=config['crop_size']):
         super(EfficientNet, self).__init__()
         model = EffNet.from_pretrained(f'efficientnet-b{compound_coef}', load_weights)
-        for param in model.parameters():  # nn.Module有成员函数parameters()
+        del model._conv_head
+        del model._bn1
+        # del model._avg_pooling
+        # del model._dropout
+        for name, param in model.named_parameters():  # nn.Module有成员函数parameters()
+            if "_blocks.10" in name:
+                break
             param.requires_grad = False
-        in_features = model._fc.in_features
+        in_features = model._blocks_args[-1].output_filters
         out_features = 128
         model._fc = nn.Linear(in_features, out_features)
         self.model = model
@@ -46,42 +53,14 @@ class EfficientNet(nn.Module):
             if drop_connect_rate:
                 drop_connect_rate *= float(idx) / len(self.model._blocks)
             x = block(x, drop_connect_rate=drop_connect_rate)
-        x = self.model._conv_head(x)
+        # x = self.model._conv_head(x)
         x = self.model._avg_pooling(x)
         x = x.view(bs, -1)
         x = self.model._dropout(x)
         x = self.model._fc(x)
         return x.unsqueeze(0)
 
-    def get_objects(self, image, boxes):
-        h, w, _ = image.shape
-        size = self.crop_size
-        objects = torch.zeros((1, 3, size, size))
-        if self.use_gpu:
-            objects = objects.cuda()
-        for j in range(boxes.shape[0]):
-            box = boxes[j]
-            center_x = int(box[0].item())
-            center_y = int(box[1].item())
-            if center_x == 0 and center_y == 0:
-                ob = torch.zeros((1, 3, size, size))
-            else:
-                if center_x < size:
-                    center_x = size
-                elif center_x > w-size:
-                    center_x = w-size
-                if center_y < size:
-                    center_y = size
-                elif center_y > h-size:
-                    center_y = h-size
-                ob = image[:, center_y - size//2: center_y + size//2, center_x - size//2: center_x + size//2]
-                ob = ob.unsqueeze(0)
-            if self.use_gpu:
-                ob = ob.cuda()
-            objects = torch.cat((objects, ob), 0)
-        return objects[1:]
-
-    def forward(self, current_image, next_image, current_box, next_box):
+    def forward(self, current_image, next_image):
         current_feature = torch.zeros((1, 60, 128))
         next_feature = torch.zeros((1, 60, 128))
         if self.use_gpu:
@@ -89,11 +68,9 @@ class EfficientNet(nn.Module):
             next_feature = next_feature.cuda()
         for i in range(current_image.shape[0]):
             # get current_feature
-            objects1 = self.get_objects(current_image[i], current_box[i])
-            feature1 = self.forward_once(objects1)
+            feature1 = self.forward_once(current_image[i])
             current_feature = torch.cat((current_feature, feature1), 0)
             # get next_feature
-            objects2 = self.get_objects(next_image[i], next_box[i])
-            feature2 = self.forward_once(objects2)
+            feature2 = self.forward_once(next_image[i])
             next_feature = torch.cat((next_feature, feature2), 0)
         return current_feature[1:], next_feature[1:]
