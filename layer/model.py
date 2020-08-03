@@ -1,3 +1,5 @@
+import os
+
 import cv2
 import torch.nn as nn
 import torch
@@ -26,10 +28,14 @@ class EfficientNet(nn.Module):
         del model._bn1
         # del model._avg_pooling
         # del model._dropout
+        update_weight = False
         for name, param in model.named_parameters():  # nn.Module有成员函数parameters()
             if "_blocks.10" in name:
-                break
-            param.requires_grad = False
+                update_weight = True
+            elif "_blocks.11" in name:
+                update_weight = False
+            if update_weight is False:
+                param.requires_grad = False
         in_features = model._blocks_args[-1].output_filters
         out_features = 128
         model._fc = nn.Linear(in_features, out_features)
@@ -74,3 +80,15 @@ class EfficientNet(nn.Module):
             feature2 = self.forward_once(next_image[i])
             next_feature = torch.cat((next_feature, feature2), 0)
         return current_feature[1:], next_feature[1:]
+
+    def load_weights(self, base_file):
+        other, ext = os.path.splitext(base_file)
+        if ext == '.pkl' or '.pth':
+            print('Loading weights into state dict...')
+            self.load_state_dict(
+                torch.load(base_file,
+                           map_location=lambda storage, loc: storage)
+            )
+            print('Finished')
+        else:
+            print('Sorry only .pth and .pkl files supported.')

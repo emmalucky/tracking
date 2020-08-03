@@ -3,6 +3,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.autograd import Variable
 from config.config import config
+torch.set_printoptions(profile="full")
 
 
 class SSTLoss(nn.Module):

@@ -29,7 +29,7 @@ def test(choice=None):
 
     if args.type == 'test':
         # dataset_index = [1, 3, 6, 7, 8, 12, 14]
-        dataset_index = [1]
+        dataset_index = [6]
         dataset_detection_type = {'-SDP'}
         # dataset_detection_type = {'-FRCNN', '-SDP', '-DPM'}
 

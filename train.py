@@ -33,6 +33,9 @@ def train():
         model = EfficientNet(0, True).cuda()
     else:
         model = EfficientNet(0, True)
+    if config['resume']:
+        print('Resuming training, loading {}...'.format(config['resume']))
+        model.load_weights(config['resume'])
     optimizer = optim.SGD(model.parameters(), lr=config['learning_rate'],
                           momentum=config['momentum'],
                           weight_decay=config['weight_decay'])
@@ -126,7 +129,8 @@ def train():
             if iteration % 1000 == 0:
                 for name, param in model.named_parameters():
                     writer.add_histogram(name, param.clone().cpu().data.numpy(), iteration)
-        if iteration % save_weights_iteration == 0:
+        # if iteration % save_weights_iteration == 0:
+        if loss.item() < 0.02:
             print('Saving state, iter:', iteration)
             torch.save(model.state_dict(),
                        os.path.join(

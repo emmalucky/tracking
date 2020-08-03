@@ -51,7 +51,7 @@ test mot train dataset
 
 
 def init_test_mot17():
-    config['resume'] = './weights/MOT17/1/sst300_0712_16770.pth'
+    config['resume'] = './weights/MOT17/1031-E120-M80-G30-weights/sst300_0712_12390.pth'
     config['mot_root'] = 'D:/tracking_system/SST-master/dataset/MOT17'
     config['save_folder'] = './seagate/weights0326-I50k-M80-G30'
     config['log_folder'] = './seagate/logs/1008-age-node'
@@ -73,9 +73,9 @@ def init_train_mot17():
     config['save_folder'] = './weights/MOT17/1031-E120-M80-G30-weights'
     config['save_images_folder'] = './weights/MOT17/1031-E120-M80-G30-images'
     config['type'] = 'train'
-    config['resume'] = None  # None means training from sketch.
+    config['resume'] = './weights/MOT17/1031-E120-M80-G30-weights/sst300_0712_6227.pth'  # None means training from sketch.
     config['detector'] = 'DPM'
-    config['start_iter'] = 0
+    config['start_iter'] = 6228
     config['iteration_epoch_num'] = 120
     config['iterations'] = config['start_iter'] + config['epoch_size'] * config['iteration_epoch_num'] + 50
     # config['batch_size'] = 4
@@ -84,8 +84,8 @@ def init_train_mot17():
     config['learning_rate_decay_by_epoch'] = (50, 80, 100, 110)
     config['save_weight_every_epoch_num'] = 5
     config['min_gap_frame'] = 0  # randomly select pair frames with the [min_gap_frame, max_gap_frame]
-    config['max_gap_frame'] = 30
-    config['false_constant'] = 1
+    config['max_gap_frame'] = 10
+    config['false_constant'] = 0.1
     config['num_workers'] = 1
     config['cuda'] = True
     config['max_object'] = 60

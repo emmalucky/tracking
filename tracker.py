@@ -310,10 +310,10 @@ class TrackerConfig:
     max_track_node = 30
     max_draw_track_node = 30
     """
-    max_record_frame = 25
-    max_track_age = 25
-    max_track_node = 25
-    max_draw_track_node = 25
+    max_record_frame = 15
+    max_track_age = 15
+    max_track_node = 15
+    max_draw_track_node = 15
 
     max_object = config['max_object']
     sst_model_path = config['resume']
@@ -493,13 +493,10 @@ class FeatureRecorder:
             self.all_image[frame_index] = image
 
             self.all_similarity[frame_index] = {}
-            if frame_index == 4:
-                exit(0)
             for pre_index in self.all_frame_index[:-1]:
                 delta = pow(TrackerConfig.decay, (frame_index - pre_index) / 3.0)
                 pre_similarity = self.get_similar(Variable(self.all_features[pre_index]),
                                                   Variable(features), fill_up_column=False)
-                print(pre_similarity)
                 self.all_similarity[frame_index][pre_index] = pre_similarity * delta
 
             self.all_iou[frame_index] = {}
@@ -510,7 +507,6 @@ class FeatureRecorder:
                 else:
                     aligned_boxes = TrackUtil.AffinePoints(self.all_boxes[pre_index], warp_matrix)
                     iou = TrackUtil.get_iou(aligned_boxes, boxes)
-                print(iou)
                 self.all_iou[frame_index][pre_index] = iou
         else:
             self.all_features[frame_index] = features
